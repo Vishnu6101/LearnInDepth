@@ -1,0 +1,15 @@
+# Python/FastAPI
+.venv/
+.env
+*.pyc
+__pycache__/
+.pytest_cache/
+htmlcov/
+.coverage
+.DS_Store
+
+# Docker
+*.log
+
+# Database
+*.db
