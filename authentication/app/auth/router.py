@@ -5,7 +5,8 @@ from datetime import datetime, timezone
 from app.auth.schema import CreateUser
 from app.auth.models import User, RefreshToken, Sessions
 from app.auth.database import get_db
-from app.auth.security import hash_password, verify_password
+from app.auth.utils.security.password_hash import hash_password, verify_password
+from app.auth.utils.security.fingerprint import generate_fingerprint
 from app.auth.tokens import create_access_token, create_refresh_token, refresh_token_expiry
 from fastapi.security import OAuth2PasswordRequestForm
 from app.auth.jwt_dependency import get_current_user_id
@@ -74,10 +75,20 @@ def login(
             detail="Invalid Email or Password"
         )
     
+    # Creating a session fingerprint
+    user_agent = request.headers.get("user-agent")
+    accept_language = request.headers.get("accept-language")
+
+    fingerprint_hash = generate_fingerprint(
+        user_agent=user_agent,
+        accept_language=accept_language
+    )
+    
     # creating a new session for user
     session = Sessions(
         user_id = existing_user.id,
-        user_agent = request.headers.get("user-agent"),
+        fingerprint_hash = fingerprint_hash,
+        user_agent = user_agent, 
         ip_address = request.client.host
     )
 
@@ -106,6 +117,7 @@ def login(
 
 @router.post("/refresh")
 def refresh_tokens(
+        request: Request,
         refresh_token: str, 
         db: Session = Depends(get_db)
     ):
@@ -150,6 +162,24 @@ def refresh_tokens(
     if not session:
         raise HTTPException(status_code=401, detail="Session Inactive")
     
+    # Checking session fingerprint
+    current_fingerprint_hash = generate_fingerprint(
+        user_agent = request.headers.get("user-agent"),
+        accept_language = request.headers.get("accept-language")
+    )
+
+    # Possible token theft - make session inactive
+    if current_fingerprint_hash != session.fingerprint_hash:
+        session.is_active = False
+        token.revoked = True
+        db.commit()
+
+        raise HTTPException(
+            status_code=401,
+            detail="Device Mismatch. possible Token theft!!!"
+        )
+    
+    # Same device so refresh existing token and issue access token
     token.revoked = True # marking the token as used one
 
     # Rotating refresh token

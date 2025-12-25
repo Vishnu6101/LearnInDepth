@@ -1,7 +1,7 @@
 from sqlalchemy import Column, String, DateTime, ForeignKey, Boolean, UniqueConstraint
 from sqlalchemy.sql import func
 from app.auth.database import Base
-from app.auth.utils.ids import generate_id
+from app.auth.utils.common.ids import generate_id
 
 class User(Base):
     __tablename__ = "users"
@@ -33,6 +33,7 @@ class Sessions(Base):
 
     id = Column(String, primary_key=True, default=lambda: generate_id("ses"))
     user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"))
+    fingerprint_hash = Column(String, nullable=False)
     user_agent = Column(String, nullable=True)
     ip_address = Column(String, nullable=True)
     is_active = Column(Boolean, default=True)
