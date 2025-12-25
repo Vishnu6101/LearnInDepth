@@ -10,6 +10,8 @@ from app.auth.utils.security.fingerprint import generate_fingerprint
 from app.auth.tokens import create_access_token, create_refresh_token, refresh_token_expiry
 from fastapi.security import OAuth2PasswordRequestForm
 from app.auth.jwt_dependency import get_current_user_id
+from app.auth.clients.redis import get_redis_connection
+from redis import Redis
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -56,7 +58,8 @@ def login(
         request: Request, 
         response: Response,
         user: OAuth2PasswordRequestForm = Depends(), 
-        db: Session = Depends(get_db)
+        db: Session = Depends(get_db),
+        redis_client: Redis = Depends(get_redis_connection)
     ):
 
     # OAuthPasswordRequestForm will accept username and password. naming standards of OAuth2 only
@@ -102,12 +105,19 @@ def login(
         token = create_refresh_token(),
         expires_at = refresh_token_expiry()
     )
-
-    # creating new access token
-    access_token = create_access_token(existing_user.id)
     
     db.add(refresh_token)
     db.commit()
+
+    # creating new access token
+    access_token = create_access_token(existing_user.id, session.id)
+    
+    # Storing session info in redis with expiration
+    redis_client.set(
+        name=f"session:{session.id}",
+        value="active",
+        ex=60 * 60 * 24 * 30  # 30 days
+    )
     
     # setting refresh token in cookies
     response.set_cookie(
@@ -129,12 +139,12 @@ def login(
 def refresh_tokens(
         request: Request,
         response: Response,
-        db: Session = Depends(get_db)
+        db: Session = Depends(get_db),
+        redis_client: Redis = Depends(get_redis_connection)
     ):
 
     # Get refresh token from cookies
     refresh_token = request.cookies.get("refresh_token")
-    print(refresh_token)
 
     if not refresh_token:
         raise HTTPException(status_code=401, detail="Missing Refresh token")
@@ -176,8 +186,8 @@ def refresh_tokens(
         Sessions.is_active == True
     ).first()
 
-    if not session:
-        raise HTTPException(status_code=401, detail="Session Inactive")
+    if not session or not redis_client.exists(f"session:{session.id}"):
+        raise HTTPException(status_code=401, detail="Session Inactive / Expired")
     
     # Checking session fingerprint
     current_fingerprint_hash = generate_fingerprint(
@@ -209,10 +219,17 @@ def refresh_tokens(
 
     # updating the last used time
     session.last_used_at = datetime.now(timezone.utc)
-    access_token = create_access_token(session.user_id)
 
     db.add(new_refresh_token)
     db.commit()
+
+    access_token = create_access_token(session.user_id, session.id)
+
+    # Extend session expiration in redis
+    redis_client.expire(
+        name=f"session:{session.id}",
+        time=60 * 60 * 24 * 30
+    )
 
     # setting new refresh token in cookies
     response.set_cookie(
@@ -233,7 +250,8 @@ def refresh_tokens(
 def logout(
         request: Request,
         response: Response, 
-        db: Session = Depends(get_db)
+        db: Session = Depends(get_db), 
+        redis_client: Redis = Depends(get_redis_connection)
     ):
 
     # Get refresh token from cookies
@@ -256,6 +274,9 @@ def logout(
         Sessions.is_active == True
     ).first()
 
+    # delete from redis
+    redis_client.delete(f"session:{session.id}")   # instant logout
+
     if session:
         session.is_active = False
 
@@ -275,13 +296,19 @@ def logout(
 @router.post("/logout-all")
 def logout_all(
         user_id: str = Depends(get_current_user_id), 
-        db: Session = Depends(get_db)
+        db: Session = Depends(get_db),
+        redis_client: Redis = Depends(get_redis_connection)
     ):
     
     # Mark all the session for that user as in active
     all_session = db.query(Sessions).filter(
-        Sessions.user_id == user_id
-    ).update({"is_active": False})
+        Sessions.user_id == user_id,
+        Sessions.is_active == True
+    ).all()
+
+    for session in all_session:
+        redis_client.delete(f"session:{session.id}")  # delete from redis
+        session.is_active = False
 
     db.commit()
 
