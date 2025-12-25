@@ -1,5 +1,5 @@
-import redis
 from fastapi import HTTPException
+import redis
 
 redis_client = redis.Redis(
     host="localhost",

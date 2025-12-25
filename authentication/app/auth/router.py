@@ -1,17 +1,18 @@
 from fastapi import APIRouter, Depends, status, HTTPException, Request, Response
-from sqlalchemy.orm import Session
-from datetime import datetime, timezone
-
-from app.auth.schema import CreateUser
-from app.auth.models import User, RefreshToken, Sessions
-from app.auth.database import get_db
-from app.auth.utils.security.password_hash import hash_password, verify_password
-from app.auth.utils.security.fingerprint import generate_fingerprint
-from app.auth.tokens import create_access_token, create_refresh_token, refresh_token_expiry
 from fastapi.security import OAuth2PasswordRequestForm
-from app.auth.jwt_dependency import get_current_user_id
-from app.auth.clients.redis import get_redis_connection
+from sqlalchemy.orm import Session
+
+from datetime import datetime, timezone
 from redis import Redis
+
+from app.auth.clients.database import get_db
+from app.auth.clients.redis import get_redis_connection
+from app.auth.models import User, RefreshToken, Sessions
+from app.auth.schema import CreateUser
+from app.auth.utils.security.fingerprint import generate_fingerprint
+from app.auth.utils.security.jwt_dependency import get_current_user_id
+from app.auth.utils.security.password_hash import hash_password, verify_password
+from app.auth.utils.security.tokens import create_access_token, create_refresh_token, refresh_token_expiry
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -28,7 +29,7 @@ def register(
 
     if exisiting_user:
         raise HTTPException(
-            status_code=400,
+            status_code=status.HTTP_409_CONFLICT,
             detail="User already exisits"
         )
     
@@ -75,7 +76,7 @@ def login(
 
     if not existing_user or not verify_password(password, existing_user.password_hash):
         raise HTTPException(
-            status_code=404,
+            status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid Email or Password"
         )
     
@@ -147,7 +148,7 @@ def refresh_tokens(
     refresh_token = request.cookies.get("refresh_token")
 
     if not refresh_token:
-        raise HTTPException(status_code=401, detail="Missing Refresh token")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing Refresh token")
     
     # check if token is valid
     token = db.query(RefreshToken).filter(
@@ -155,7 +156,7 @@ def refresh_tokens(
     ).first()
 
     if not token: 
-        raise HTTPException(status_code=401, detail="Invalid Refresh token")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid Refresh token")
     
     # Token reuse - not allowed to refresh
     if token.revoked:
@@ -175,7 +176,7 @@ def refresh_tokens(
         db.delete(token)
         db.commit()
         raise HTTPException(
-            status_code=401,
+            status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Token Expired. Please Login Again"
         )
     
@@ -187,7 +188,7 @@ def refresh_tokens(
     ).first()
 
     if not session or not redis_client.exists(f"session:{session.id}"):
-        raise HTTPException(status_code=401, detail="Session Inactive / Expired")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session Inactive / Expired")
     
     # Checking session fingerprint
     current_fingerprint_hash = generate_fingerprint(
@@ -202,7 +203,7 @@ def refresh_tokens(
         db.commit()
 
         raise HTTPException(
-            status_code=401,
+            status_code=status.HTTP_403_FORBIDDEN,
             detail="Device Mismatch. possible Token theft!!!"
         )
     
@@ -258,7 +259,7 @@ def logout(
     refresh_token = request.cookies.get("refresh_token")
 
     if not refresh_token: 
-        raise HTTPException(status_code=401, detail="Missing Refresh token")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing Refresh token")
 
     # check if token is valid
     token = db.query(RefreshToken).filter(

@@ -1,7 +1,7 @@
+from app.auth.clients.database import Base
+from app.auth.utils.common.ids import generate_id
 from sqlalchemy import Column, String, DateTime, ForeignKey, Boolean, UniqueConstraint
 from sqlalchemy.sql import func
-from app.auth.database import Base
-from app.auth.utils.common.ids import generate_id
 
 class User(Base):
     __tablename__ = "users"

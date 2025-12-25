@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends
-from app.auth.jwt_dependency import get_current_user_id
+from app.auth.utils.security.jwt_dependency import get_current_user_id
 
 router = APIRouter(prefix="/user", tags=["user"])
 
