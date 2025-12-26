@@ -13,3 +13,5 @@ htmlcov/
 
 # Database
 *.db
+
+secrets/

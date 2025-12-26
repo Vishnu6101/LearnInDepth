@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, APIRouter
 from contextlib import asynccontextmanager
 
 from app.auth.clients.database import engine, Base
@@ -14,5 +14,17 @@ async def lifespan(app: FastAPI):
     # shutdown
 
 app = FastAPI(lifespan=lifespan)
+
+router = APIRouter(prefix="")
+
+@router.get("/ping")
+def ping():
+    return {"status": "pong"}
+
+@router.get("/health")
+def health_check():
+    return {"status" : "Healthy"}
+
 app.include_router(auth_router)
 app.include_router(user_router)
+app.include_router(router)
